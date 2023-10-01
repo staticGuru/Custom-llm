@@ -1,0 +1,301 @@
+Self-hosting an AI (LLM) chatbot without going broke
+In the recent years, the efforts of OpenAI and other organizations haven't gone unnoticed. While there's definitely controversy regarding things like copyrights and intellectual property, at the same time the results speak for themselves - many out there are exploring the use cases for generative AI applications, to aid in anything from writing and doing programming, to creating art.
+
+Sometimes, it works pretty decently, like how you can use something like GitHub Copilot for boilerplate code with decent success, or something like Midjourney for creating anything from sketches, placeholder art or even what some would describe as proper art pieces. Other times, it causes lots of issues, like when the Clarkesworld sci-fi/fantasy magazine was spammed with AI generated submissions, due to many utilizing the AI for their own personal benefit, and not really thinking about the potential consequences of such irresponsible behavior.
+
+Regardless of how you feel about these forms of AI (or whether they should even be called that), I'm curious about something else: is it possible to run our own, on our local device, without going broke?
+
+logo
+
+You see, almost nobody out there actually runs their own LLMs locally, instead almost everyone is okay with building their entire business on a cloud API that they don't control. In other words, they are using Services as a Software Substitute, and are fully at the mercy of whoever runs them - if OpenAI decides to increase their prices 2x tomorrow, that's just what you're going to have to deal with. It's not like you can go elsewhere and get similar results as the proprietary software would provide you with...
+
+...or can you?
+
+The hardware challenges
+The problem that we're going to run into from the very first moment, is that we're going to need some good hardware. Most of the current LLM implementations run best on GPUs and that's unlikely to change anytime soon. We can actually find plenty of models that we can download for free on Hugging Face, but running them will be another matter entirely. Furthermore, when talking about the GPUs that we should get, our options are further limited because of the closed nature of technologies build around particular vendors, a walled garden situation for sure.
+
+You see, Nvidia has the CUDA technology, for getting GPUs work better for general purpose programming tasks - given that they normally process lots of data in parallel for drawing things on every single one of the pixels on a monitor, that actually makes them well suited for other use cases like neural networks and certain kinds of simulations. However, unfortunately, while the support for CUDA is pretty widespread, the AMD alternative, ROCm, has only resulted in negative experiences for me.
+
+First up, there's no Windows support - that might not be a dealbreaker for me, but certainly will discourage some. Next, I actually tried getting ROCm working with some of the technologies that we're going to be using today, yet it refused to work with my particular GPU - which wouldn't be a problem in of itself, if there were clear error messages, as opposed to errors that don't actually tell you what to try next, what the exact problem is. That wasn't helped by an overcomplicated custom driver install process either, with kernel modules that fail to be setup correctly with DKMS and send you off on a whole rabbit chase with no results in the end.
+
+So, if we wanted to run something on a GPU, we'd probably have to use one of the Nvidia ones. In addition to that, we'd probably want at least 8 GB of VRAM, so that all of the model data (for the simpler models) could be loaded into the memory, which limits our choices further:
+
+store example
+
+Now, for some folks out there, an up front investment of 300 - 400 EUR might not be a dealbreaker, especially those who are working in the tech sector, or those who might benefit from those pieces of hardware otherwise too. But if you ever try to scale this up, you'd run into the situation of having to pay for multiple nodes, which would need multiple GPUs, which definitely is something to consider. In the mean time, many of us are stuck for a variety of reasons on older hardware, or other vendors - in my case I have an RX 570 as my daily driver and an RX 580 as a reasonably cheap upgrade option for later, since that's all that I need for myself.
+
+There's also the possibility of renting cloud hardware, which is giving up a bit more of your freedoms here, but at least then you're just beholden to the hardware vendor, not a particular platform as much. For example, if you had a look at Hetzner's Server auction, you'd find that the cheapest options still start at around 100 EUR monthly, even if they do have the venerable GeForce GTX 1080 GPU in them:
+
+Hetzner GPU
+
+That's even before you consider how many such servers you might actually be able to get at any given time. Even though they have pretty affordable deals in general, you'd still be paying more than the up front cost of just buying a GPU in about 3 months' time. Once you look into the larger providers that have specific GPU instances on offer, the situation gets even more grim. Something like Scaleway's GPU instances will set you back over 700 EUR every month:
+
+Scaleway GPU
+
+In other words, if you don't have a nice wad of cash to spend, then you're not welcome there, because you're not the target audience for such services. Now, the technologies that I'm about demonstrate will work if you have an Nvidia GPU (and could work with AMD as well), but I want to explore the worst case here: what if we don't have a GPU at all, and can't afford one?
+
+What we are actually going to use
+Turns out, that you can actually run LLMs on CPU as well, and you don't even need an M1 Mac to do that, either! So, what's this technology that I'm about to disclose?
+
+It's actually just a community effort called KoboldAI in combination with a few other pieces of software, notably koboldcpp and some borrowed instructions from other communities like PygmalionAI. Now, if you dig into it a bit more, they are building on top of existing LLMs efforts, like GPT-J 6B and Facebook's LLaMa or even Stanford's Alpaca, but it's a wonderful rabbit hole of cool research and development that we won't go into too deeply this time.
+
+I'll actually let KoboldAI just explain it themselves:
+
+KoboldAI
+
+From what I gather, they started out as an open source attempt to recreate something a bit like the AI Dungeon platform, essentially something a bit like an AI driven game of Dungeons & Dragons, or maybe chatbots like Character.AI. It turns out that they've basically built tools that can be used to interact with the majority of models out there, for free and on your own device!
+
+The missing piece here is the aforementioned koboldcpp project that bundles everything you need in an easy to use package. The expectation here is that it all should eventually work on CPUs, both locally and in the cloud, where the server offerings by Hetzner and other providers suddenly seem more affordable (even if you'd need to go for a package with a decent amount of RAM and CPU cores):
+
+Hetzner CPU
+
+Of course, the models that we'll be able to run won't be the most sophisticated, nor will the performance scale very far, but my main goal here is to prove that it's possible and not exorbitantly expensive (at least as long as you don't try to train your own custom models). Think along the lines of adding a chatbot to your low-traffic homepage, or offering a text based assistant for easy tasks, albeit without dismissing future improvements either, given that 4-bit quantization has already made feasible what was previously impossible.
+
+Setting it up
+I'll actually borrow the instructions from the Pygmalion project here, but adapt them so we can get koboldcpp and models of our choosing running inside of Docker containers, so that I can test the same implementation both locally, and ship it to remote servers later. Thankfully, the following Dockerfile is enough for our needs here and there are no surprises:
+
+# My custom Python image, you can use a more generic Debian/Ubuntu based one
+FROM docker-dev.registry.kronis.dev:443/python3
+
+# Where we're going to store everything
+WORKDIR /workspace
+
+# Requirements for OpenBLAS (CPU: libopenblas-dev) and CLBlast (GPU: libclblast-dev, only from Ubuntu 22.04)
+RUN eatmydata apt-get update \
+    && eatmydata apt-get -yq --no-upgrade install \
+        libopenblas-dev \
+    && eatmydata apt-get clean \
+    && rm -rf /var/lib/apt/lists /var/cache/apt/*
+
+# Build KoboldCPP (available with LLAMA_OPENBLAS=1 LLAMA_CLBLAST=1)
+RUN git clone https://github.com/LostRuins/koboldcpp \
+    && pushd koboldcpp && make LLAMA_OPENBLAS=1 && popd \
+    && mv /workspace/koboldcpp/* /workspace && rm -rf /workspace/koboldcpp
+
+# Where we will store the models
+RUN mkdir -p /workspace/models \
+    && echo "Please put a proper model here!" > /workspace/models/default.bin
+
+# Setup entrypoint
+COPY ./docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+CMD "/docker-entrypoint.sh"
+We install the OpenBLAS package for better performance, but not CLBlast because we're not going to be using GPU in this particular example. We setup a placeholder model and an entrypoint, with the following script contents:
+
+#!/bin/bash
+
+echo "Available models:"
+ls -l /workspace/models
+
+# Custom launch command
+echo "Setting up launch command..."
+export LAUNCH_COMMAND=${LAUNCH_COMMAND:-"python koboldcpp.py --smartcontext --unbantokens"}
+echo "Setting up LAUNCH_COMMAND: $LAUNCH_COMMAND"
+
+# Custom model command
+echo "Setting up model to use..."
+export MODEL=${MODEL:-'models/default.bin'}
+echo "Setting up MODEL: $MODEL"
+
+# Run koboldcpp
+echo "Running koboldcpp..."
+bash -c "$LAUNCH_COMMAND $MODEL"
+The idea here is that we'll allow customizing the launch command, the model to use, or both! There are some launch options that you can use to customize your experience, if needed, or something doesn't work on your hardware.
+
+With all of that, we can make a Docker Compose file that's a bit like the following:
+
+version: '3.8'
+services:
+  kobold:
+    image: docker-dev.registry.kronis.dev:443/kobold_kontainer:latest
+    ports:
+      - target: 5001
+        published: 5001
+        protocol: tcp
+        mode: host
+    environment:
+      LAUNCH_COMMAND: python koboldcpp.py --smartcontext --unbantokens
+      MODEL: models/default.bin
+    # Add custom models downloaded externally
+    # volumes:
+    #   - ./some-model.bin:/workspace/models/some-model.bin
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: "4096M"
+While my personal registry probably won't be available to you, you can adapt the example to your own needs, or even use a locally built image (with the build option, instead of image). In practice, you'll probably also want to give the container as many CPU cores and as much memory as possible, depending on what models you intend to work with. In the end, however, this is all you need to do to get the image built and working:
+
+docker build -t kobold_kontainer .
+docker-compose -f docker-compose-local.yml up
+Except for the actual models themselves, which we'll need to get separately:
+
+first-launch
+
+But what model should we choose? Thankfully, there are plenty of options, depending on our needs, so let's explore those!
+
+Choosing a model
+Once again, the Hugging Face site is where we'll most likely find all of the models that we need, regardless of what we want to do. For the most part, we'll most likely be limited to either 6 or 7 billion parameter models, with the 4-bit quantization, to make them have passable performance when running on a CPU. As for which ones to choose in particular, personally I just look around for a bit until I find some groups that seem to have the correct formats, and then pick whatever is popular.
+
+For example, a user named TehVenom has plenty of models in the GGML format that we can run directly without further conversions or processing:
+
+TehVenom
+
+Do note, however, that some of those models are uncensored, or don't have the filtering that ChatGPT and other commercial offerings might necessarily have. While you can instruct the models to be professional and polite, there are circumstances in which they might result in output that contains profanity or adult content. While that might be useful for someone trying to use AI for writing a fiction story, that is probably not what you want in an externally facing chatbot use case - so be sure to read through the descriptions of models that you want to download.
+
+Metharme
+In my case, I rather enjoy the idea of using models like Metharme. Here's its description:
+
+Metharme 7B is an instruct model based on Meta's LLaMA-7B. This is an experiment to try and get a model that is usable for conversation, roleplaying and storywriting, but which can be guided using natural language like other instruct models. It was trained by doing supervised fine-tuning over a mixture of regular instruction data alongside roleplay, fictional stories and conversations with synthetically generated instructions attached.
+
+In my eyes, its approach is quite nice, because it attempts to separate the instructions for the model from user input. When using Metharme, a prompt might look like the following:
+
+<|system|>You are a customer service chatbot. 
+If the user expresses displeasure, apologize for any inconveniences caused.
+If the user has a question regarding billing, suggest that they visit https://billing.myapp.com.
+If the user has a question regarding shipping/tracking, suggest that they have a look at the shipping status in their account page, remind the user that shipping may take around 14 business days. 
+If the user has further questions, suggest that they contact support via e-mail: support@myapp.com
+<|user|>Hello, I have a problem with my order. I already paid a week ago, but I haven't gotten any tracking updates for the package.
+<|model|>
+In contrast to many of the other models out there, here we finally have an attempt at having proper separation of the request:
+
+<|system|> is the internal model knowledge, where you'd write instructions for the model to follow
+<|user|> is where you'd input the user's request or other information for the model to process and respond to
+finally, <|model|> lets the model know that it should generate a response to the query
+I came up with the above example in a few minutes, without giving it too much thought, but the results are encouraging:
+
+example Metharme
+
+(using the built in web interface for this demonstration, which is on the port that we published)
+
+Of course, in this case it's working locally on my computer, with a desktop processor and therefore I chose to leave the output length quite short (up to 80 tokens), but if there's one thing that these models are good for, it's loosely approximating how to make natural language sentences. I wouldn't use them for recounting much in the way of historical facts or concrete programming language APIs (unless they're optimized for that a lot, but even then there's bound to be hallucination), but they're already passable at following some simple instructions.
+
+Pygmalion
+Because this project had some nice instructions that helped me get started, I also had a look at the Pygmalion model. Here's its description:
+
+Pygmalion 7B is a dialogue model based on Meta's LLaMA-7B. ... The model was trained on the usual Pygmalion persona + chat format, so any of the usual UIs should already handle everything correctly.
+
+From what I can tell, this one is more entertainment oriented, so you essentially give the chatbot a "persona" that it attempts to follow, even its description suggests that you might want to generally use it for entertainment purposes. It also has a slightly different prompt structure because of this:
+
+SummaryBot's Persona: SummaryBot is a chatbot, that summarizes articles to the best of its ability in a few sentences and returns bullet points in Markdown.
+<START>
+You: Please summarize the following snippet of text for me: 
+Gross domestic product (GDP) is a monetary measure of the market value of all the final goods and services produced in a specific time period by a country or countries.
+GDP is most often used by the government of a single country to measure its economic health.
+Due to its complex and subjective nature, this measure is often revised before being considered a reliable indicator.
+GDP (nominal) per capita does not, however, reflect differences in the cost of living and the inflation rates of the countries; therefore, using a basis of GDP per capita at purchasing power parity (PPP) may be more useful when comparing living standards between nations, while nominal GDP is more useful comparing national economies on the international market.
+Total GDP can also be broken down into the contribution of each industry or sector of the economy. The ratio of GDP to the total population of the region is the per capita GDP (also called the Mean Standard of Living). 
+SummaryBot:
+This model is also capable of natural language and even following the given instructions. However, once you try to question it further, it all breaks down a bit:
+
+example Pygmalion
+
+(using the built in web interface's aesthetic chat UI, just to show it off as well)
+
+Even aside from the fact that it didn't output Markdown like asked, it doesn't stick to just the information in the original post when you ask questions, but will refer to other sources. The problem is that with these LLMs you've no idea whether any of the sources are actually real or not. For example, the direct link that it gave as a source lead nowhere, but it got it very close to an actual site about a survey:
+
+economic census
+
+That said, at first I was skeptical, because other sites suggested different methods for getting the GDP data in USA, but this time it seems like the model might not actually be far off, since the site's FAQ does mention GDP:
+
+The Economic Census serves as the statistical benchmark for current economic activity by informing the Gross Domestic Product and the Producer Price Index. It provides information on business locations, the workforce, and trillions of dollars of sales by product and service type.
+
+In a sense, the fault is on me for not instructing the model to stick to sourcing answers from the text provided, but at the same time it pointed me in the right direction, even though I had to double check the claims myself. Of course, most folks might want the model to DM a game of Dungeons & Dragons for them, or use it for other entertainment purposes (including regular conversations with a character/persona), so one's needs for factual accuracy will probably vary.
+
+Deploying this on a server
+But how would it fare if we actually deployed it on a server? Would server class hardware have better response times for our queries? Let's do that with my container image and Metharme, and see how we do!
+
+First, I build my container image and push it to my container registry thanks to Drone CI, though how you do this is up to you. There are actually so few dependencies, that you could easily do the build on the server where you want to run everything as well, given that we're not including any particular model here (so I don't have to store multiple GB of model files in the registry myself for now):
+
+Kobold CI
+
+In this case, I'll test it all out with a VPS from Hetzner, with the aforementioned AMD plan for 25 EUR a month (though with VAT it's more like 30 EUR for me), which is much more affordable than getting your own hardware, at least for the first year or so:
+
+Hetzner VPS
+
+If you have your own servers or data center, then that's great, too! My personal homelab just has regular consumer hardware, so I want to experiment with the performance I might get with something a bit more powerful.
+
+Then we can install Docker, authorize with the registry and even download the model we're going to use:
+
+wget https://huggingface.co/TehVenom/Metharme-7b-4bit-Q4_1-GGML/resolve/main/Metharme-7b-4bit-Q4_1-GGML-V2.bin
+and instruct our Docker Compose stack to use it, in addition to increasing the available resources to match the VPS package:
+
+version: '3.8'
+services:
+  kobold:
+    ...
+    environment:
+      LAUNCH_COMMAND: python koboldcpp.py --threads 8 --smartcontext --unbantokens
+      MODEL: models/metharme.bin
+    # Add custom models downloaded externally
+    volumes:
+      - /root/Metharme-7b-4bit-Q4_1-GGML-V2.bin:/workspace/models/metharme.bin
+    deploy:
+      resources:
+        limits:
+          cpus: "7.5"
+          memory: "15360M"
+(don't actually use root normally, this is just an example)
+
+This should launch our container with no issues, using the model that we've chosen. As you can see, it only needs about 8 GB of memory, so we're mostly going to benefit from more CPU cores for speed:
+
+launching container
+
+Then, once we launch it, we can connect to the server's IP address, on the port that we've published and access the web UI and see how quickly it can respond to the prompt that we used ourselves:
+
+server response
+
+As we can see, a server with 8 CPU cores takes less than half a minute to generate a response, with similar accuracy as done locally (with a 6c/12t CPU). However, the biggest problem here is going to be how much resources this generation takes, as you can see below, the CPU usage is pretty much maxed out:
+
+server CPU usage
+
+This does more or less confirm that using a CPU for this is viable, but only as long as you don't need to process more than a few requests per second, or as long as you don't need to respond quickly to the requests. However, this is still great for something that's so easy to setup and that you can run without licensing costs, or reliance to any third parties, these containers can run anywhere!
+
+What about an API?
+In practice you probably won't want to give your users access to the UI directly, but thankfully pretty much all of the interaction you need is behind a single API endpoint:
+
+API example
+
+So, interaction with this solution is just one POST request away. First, we put something like the following in data.json, which would normally go in the POST request body:
+
+{
+    "n": 1,
+    "max_context_length": 1024,
+    "max_length": 80,
+    "rep_pen": 1.08,
+    "temperature": 0.7,
+    "top_p": 0.92,
+    "top_k": 0,
+    "top_a": 0,
+    "typical": 1,
+    "tfs": 1,
+    "rep_pen_range": 256,
+    "rep_pen_slope": 0.7,
+    "sampler_order": [6, 0, 1, 2, 3, 4, 5],
+    "prompt": "<|system|>You are a customer service chatbot. If the user expresses displeasure, apologize for any inconveniences caused. If the user has a question regarding billing, suggest that they visit https://billing.myapp.com. If the user has a question regarding shipping/tracking, suggest that they have a look at the shipping status in their account page, remind the user that shipping may take around 14 business days. If the user has further questions, suggest that they contact support via e-mail: support@myapp.com\n<|user|>Hello, I have a problem with my order. I already paid a week ago, but I haven't gotten any tracking updates for the package.\n<|model|>",
+    "quiet": true
+}
+And then we can test it out with:
+
+curl -H "Content-Type: application/json" --data @data.json http://95.217.160.42:5001/api/v1/generate/
+Which gives us a response back, this time in even a bit less time than previously:
+
+API test
+
+So, all you'd have to do is put a web server (and possibly some auth) in front of this container, let your back end talk with it and then delegate the formatting of any responses you get back to your model with users. All of this, hostable on-prem or in the cloud if you so choose, as many instances as you need or can afford, with whatever specs are required, in addition to supporting all sorts of models and advancements in the future! Maybe even GPU, if you can figure out how to make that work!
+
+Summary
+In summary, while there are some barriers to entry with LLMs, you can have your own AI chatbot today, with a little bit of work. There are plenty of models for whatever your needs are and they get better, the bigger the models you run are (with more parameters, though that also means more resources required). It's hard to say exactly how well that fares against the pricing structure of things like what OpenAI provides, but at the same time you don't have to worry about their services being too cheap just because they're subsidized and that venture capital might one day hike up the prices in pursuit of more profits.
+
+An actual good criticism of most of the current models might be that they're still very resource intensive - simpler non-LLM approaches might work better for when you're trying to serve a large amount of users, vs needing many CPU cores topping out for half a minute just to respond to a single user's request, though do remember that if/when you get a GPU running it's typically going to be quite a bit faster, in addition to it being as simple as adding the following to your run command with koboldcpp:
+
+--useclblast 0 0 --gpulayers 32
+However, to wrap this all up, I would like to remind you that it's not just about the cost of an approach like this vs something like integrating a more traditional chatbot (and the development work that goes with it). All that's needed is for this technology to deliver good enough results and then it can essentially replace hired workers that would have previously answered users' queries, and there are very few workers that you'd pay to the tune of 30 EUR a month. The perspective that doesn't get considered in these discussions often, is one where employers will sometimes get rid of departments in pursuit of more cost effective means, threatening the livelihoods of many, while sometimes also getting sub-par results from technologies that are not quite ready yet:
+
+Tessa chatbot
+
+I still think that technologies like these absolutely have the potential to make the world a better place, as long as they're not misused for the wrong incentives. For example, there's no reason why AI couldn't provide predictive writing and helping with responding to users, thus lowering the cognitive load on workers, as opposed to replacing them outright. Their productivity would increase, their livelihoods wouldn't be threatened and the end results would still be better thanks to human moderation.
+
+The future that I personally hope for is one where I can be the one writing code, but with however much assistance I want to receive from AI tools. I don't see any reason why I couldn't load up my IDE with JavaAI, JavaSpringAI and layer GoogleJavaStyleAI on top of that, to get help with the standard library and syntax of Java, help with utilizing the Spring framework, as well as suggestions for how to follow some set of consistent language style guidelines. Even now, there are projects like FauxPilot, which attempt to replicate what Github Copilot could achieve, but locally and in an open fashion.
+
+It's not like we need to introduce AI into absolutely everything, the same how technologies like the blockchain are also best suited for niche use cases and a narrow set of problems. That said, I can definitely imagine how the LLM technology is not at its best yet and has a bright future ahead of it. Until then, please use LLMs responsibility.
